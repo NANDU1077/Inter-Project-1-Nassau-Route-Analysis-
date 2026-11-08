@@ -1,6 +1,9 @@
 """Runs the real Streamlit script headlessly on every page and in edge states."""
+import os
 import sys
 from pathlib import Path
+
+os.environ["NASSAU_ML_FAST"] = "1"
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -10,7 +13,7 @@ APP = str(ROOT / "app.py")
 pytestmark = pytest.mark.skipif(not (ROOT / "data" / "Nassau_Candy_Distributor.csv").exists(), reason="dataset missing")
 
 PAGES = ["A. Executive Overview", "B. Route Efficiency", "C. Geographic Map", "D. Ship Mode Comparison",
-         "E. Route Drill-Down", "F. Data Quality"]
+         "E. Route Drill-Down", "F. Data Quality", "G. Predictive Modelling (ML)"]
 
 
 def run(page, **kw):
@@ -62,3 +65,16 @@ def test_bad_path_gives_helpful_error():
     at.sidebar.text_input[0].set_value("C:/does/not/exist.csv")
     at.run()
     assert not at.exception
+
+
+def test_ml_page_trains_and_renders():
+    at = AppTest.from_file(APP, default_timeout=300)
+    at.run()
+    at.sidebar.radio[0].set_value("G. Predictive Modelling (ML)")
+    at.run()
+    assert not at.exception
+    at.button[0].click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("What the models show" in s.value for s in at.subheader)
+    assert len(at.metric) >= 4

@@ -124,6 +124,19 @@ class CleaningReport:
     notes: list = field(default_factory=list)
 
 
+
+def leap_days_spanned(order: pd.Series, ship: pd.Series) -> pd.Series:
+    """Number of 29-Feb dates falling within [Order Date, Ship Date] (diagnostic for the relative-lead-time basis)."""
+    out = pd.Series(0, index=order.index, dtype="int64")
+    ok = order.notna() & ship.notna()
+    if not ok.any():
+        return out
+    for y in range(int(order[ok].dt.year.min()), int(ship[ok].dt.year.max()) + 1):
+        if pd.Timestamp(year=y, month=1, day=1).is_leap_year:
+            day = pd.Timestamp(year=y, month=2, day=29)
+            out += ((order <= day) & (ship >= day) & ok).astype("int64")
+    return out
+
 # --------------------------------------------------------------------------- #
 # Main cleaning pipeline
 # --------------------------------------------------------------------------- #
@@ -171,6 +184,7 @@ def clean_data(raw: pd.DataFrame, reference_date=None):
     rep.invalid_ship_dates = int(df["Flag Invalid Ship Date"].sum())
 
     df["Raw Lead Time"] = (df["Ship Date"] - df["Order Date"]).dt.days.astype("float")
+    df["Leap Days Spanned"] = leap_days_spanned(df["Order Date"], df["Ship Date"])
     df["Flag Negative Lead Time"] = df["Raw Lead Time"] < 0
     df["Flag Extreme Lead Time"] = df["Raw Lead Time"] > cfg.MAX_PLAUSIBLE_LEAD_DAYS
     df["Flag Future Ship Date"] = df["Ship Date"] > rep.reference_date

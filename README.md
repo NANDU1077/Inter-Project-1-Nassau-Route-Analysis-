@@ -38,23 +38,46 @@ Data location (first existing wins): sidebar *CSV path* / upload → env var `NA
 `C:\Users\nandu\OneDrive\Desktop\Intern1\Nassau Candy Distributor.csv`.
 To point at your own copy: `set NASSAU_CSV_PATH=C:\path\to\file.csv` (Windows) before running, or paste the path in the sidebar.
 
-Run tests: `python -m pytest -q` (24 tests: unit logic, real-data checks, and headless runs of every dashboard page).
+Run tests: `pip install -r requirements-dev.txt` then `python -m pytest -q` (35 tests: unit logic, ML leakage and baseline checks, real-data checks, and headless runs of every dashboard page).
+
+Reproduce the research-paper statistics and figures: `python reports/paper_analysis.py` (writes to `reports/output/`).
 
 ## Project structure
 
 ```
 nassau_route_analysis/
-├── app.py                # Streamlit UI: sidebar, six pages, banners, recommendations
-├── data_processing.py    # load, parse dates, validate, flag, engineer features, filters, shipments
-├── analysis.py           # KPIs, route tables, efficiency score, rankings, recommendations
-├── visualizations.py     # Plotly charts + interactive factory→state map
-├── config.py             # paths, factory coordinates, product→factory map, thresholds, colours
-├── requirements.txt
+├── app.py                 # Streamlit UI: sidebar, six pages, banners, recommendations
+├── data_processing.py     # load, parse dates, validate, flag, engineer features, filters, shipments
+├── analysis.py            # KPIs, route tables, efficiency score, rankings, recommendations
+├── ml_models.py           # cross-validated models, permutation importance, what-if predictor, route clustering
+├── visualizations.py      # Plotly charts, US heatmap, interactive factory→state map
+├── config.py              # paths, factory coordinates, product→factory map, thresholds, colours
+├── requirements.txt       # runtime dependencies (used for deployment)
+├── requirements-dev.txt   # + pytest, scipy, matplotlib (tests and paper script)
 ├── README.md
+├── .gitignore
 ├── .streamlit/config.toml
 ├── data/Nassau_Candy_Distributor.csv
-└── tests/ (test_pipeline.py, test_app_smoke.py)
+├── docs/
+│   ├── Nassau_Route_Efficiency_Research_Paper.pdf / .docx
+│   ├── Executive_Summary.pdf / .docx
+│   └── VIDEO_SCRIPTS.md
+├── reports/paper_analysis.py   # reproduces every paper statistic and figure
+└── tests/ (test_pipeline.py, test_ml.py, test_app_smoke.py)
 ```
+
+## Deliverables map
+
+| Brief deliverable | Where |
+|---|---|
+| Streamlit dashboard | `app.py` (run locally or deploy on Streamlit Community Cloud) |
+| Research paper (EDA, insights, recommendations) | `docs/Nassau_Route_Efficiency_Research_Paper.pdf` |
+| Executive summary for stakeholders | `docs/Executive_Summary.pdf` |
+
+## Deploying on Streamlit Community Cloud
+
+Push this folder's *contents* to a public GitHub repository (so `app.py` and `requirements.txt` are at the repo root, with `data/` included),
+then on share.streamlit.io choose the repo, branch `main`, main file `app.py`, and Python 3.12 under Advanced settings.
 
 ## Units of analysis (what each metric is based on)
 
@@ -103,7 +126,20 @@ Categories: ≥ 66 Efficient, 33–66 Moderate, < 33 Inefficient (`config.py`).
 * **C. Geographic Map** – US state heatmap (choropleth) plus a bubble map with factories (diamonds), top routes as lines and Canadian provinces; colour = lead time / score / delay rate; bottleneck tables.
 * **D. Ship Mode Comparison** – average/median lead time, delay frequency, volume, sales, gross profit, descriptive trade-off, and a Standard vs. Expedited grouping (assumption: First, Second Class and Same Day = Expedited).
 * **E. Route Drill-Down** – factory/state/region/product/ship-mode selectors, route metrics, state-level insights, shipment timeline, order-line detail.
+* **G. Predictive Modelling (ML)** – cross-validated lead-time regression and delay classification against a ship-mode baseline, permutation importance, what-if predictor, K-means route segments.
 * **F. Data Quality** – missing values, invalid dates, unmapped products, suspicious lead times, duplicates, removal/flag summary, plausibility check.
+
+## Machine learning
+
+* **Targets:** relative lead time (regression) and delay above the threshold (classification), at shipment level.
+* **Inputs:** factory, state, region, ship mode, division, order month and weekday, units, log sales. Ship Date and recorded lead time are never inputs (leakage).
+* **Validation:** 5-fold `GroupKFold` by Customer ID (no customer in both train and test). No time split: the relative lead time has a calendar artifact that differs by order year.
+* **Baselines:** global mean/prior and *ship-mode mean/rate*. Route-only models (no ship mode) show how much route information alone predicts.
+* **Models:** Ridge / logistic regression, random forest, histogram gradient boosting. Differences from the baseline use a paired bootstrap 95% interval.
+* **Also:** permutation importance on held-out customers; K-means route segments (k by silhouette); a what-if predictor on the dashboard page.
+* **Result on this data:** no model beats the ship-mode baseline for lead time (R² ≈ 0.62); route-only R² ≈ 0; delay AUC improves only from 0.726 to 0.745 with logistic regression. Details in the research paper (Section 5.9).
+
+The Predictive Modelling page trains on demand (about 30-90 s the first time, cached afterwards) and uses all validated shipments, independent of the sidebar filters.
 
 ## Limitations
 
@@ -117,4 +153,4 @@ Categories: ≥ 66 Efficient, 33–66 Moderate, < 33 Inefficient (`config.py`).
 * The brief lists *Fizzy Lifting Drinks* under division "Other"; the CSV has "Sugar". The CSV value is used (it does not affect factory mapping).
 * The brief describes US customers; the CSV also has 200 Canadian rows, kept and shown on the bubble map.
 * The brief says "remove invalid or negative lead times": negative/unparseable ones are excluded; implausibly *large* ones are flagged and kept (not removed), because here the issue affects every row.
-* Not part of the code: the research paper and executive summary listed under the brief's deliverables.
+* The research paper and executive summary are in `docs/`.

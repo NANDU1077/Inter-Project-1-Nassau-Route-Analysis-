@@ -15,6 +15,7 @@ import streamlit as st
 import analysis as an
 import config as cfg
 import data_processing as dp
+import ml_models as ml
 import visualizations as viz
 
 st.set_page_config(page_title="Nassau Candy | Shipping Route Efficiency", page_icon="🚚", layout="wide")
@@ -105,7 +106,7 @@ def route_cols(t: pd.DataFrame):
 # --------------------------------------------------------------------------- #
 st.sidebar.title("🚚 Nassau Candy")
 PAGES = ["A. Executive Overview", "B. Route Efficiency", "C. Geographic Map", "D. Ship Mode Comparison",
-         "E. Route Drill-Down", "F. Data Quality"]
+         "E. Route Drill-Down", "F. Data Quality", "G. Predictive Modelling (ML)"]
 page = st.sidebar.radio("Dashboard section", PAGES)
 
 with st.sidebar.expander("📁 Data source", expanded=False):
@@ -291,6 +292,16 @@ def page_data_quality():
                     f"- Relative basis reproduces the expected order: **{ok_rel}**\n\n"
                     "If only the relative basis does, that supports (but does not prove) the view that the recorded dates are shifted by a "
                     "systematic offset while carrying real ordering information.")
+        if "Leap Days Spanned" in valid and valid["Leap Days Spanned"].nunique() > 1:
+            lg = valid.groupby("Leap Days Spanned")["Relative Lead Time"].agg(["mean", "size"])
+            st.markdown("**Calendar artifact in the relative basis (leap days)**")
+            st.dataframe(lg.rename(columns={"mean": "Mean relative lead time", "size": "Rows"}).reset_index(), hide_index=True,
+                         use_container_width=True)
+            st.markdown("Rows whose Order→Ship interval spans a 29 February sit about "
+                        f"**{lg['mean'].iloc[-1] - lg['mean'].iloc[0]:.2f} days** higher on the relative basis than rows that do not, because the "
+                        "365-day cycle ignores leap days. Relative lead times therefore carry roughly ±1 day of calendar noise, so they are "
+                        "reliable for coarse comparisons (modes, large route gaps) but not for fine, single-day differences, and they should "
+                        "not be compared across order years.")
         ext = valid[valid["Flag Extreme Lead Time"]].sort_values("Raw Lead Time", ascending=False).head(200)
         st.markdown("**Most extreme records (top 200)**")
         show_table(ext, ["Row ID", "Order ID", "Order Date", "Ship Date", "Raw Lead Time", "Ship Mode", "Customer State"], height=260)
@@ -310,11 +321,129 @@ def page_data_quality():
         show_table(dups, ["Row ID", "Order ID", "Order Date", "Product Name", "Customer ID", "Sales", "Units"], height=300)
 
 
+
+# --------------------------------------------------------------------------- #
+# G. Predictive modelling (machine learning)  -- independent of sidebar filters
+# --------------------------------------------------------------------------- #
+@st.cache_data(show_spinner=False)
+def run_ml_cached(ship_df: pd.DataFrame, threshold: float):
+    return ml.run_all(ship_df, threshold)
+
+
+@st.cache_resource(show_spinner=False)
+def fit_predictor_cached(_d: pd.DataFrame, reg_name: str, clf_name: str, threshold: float, _reg_oof):
+    return ml.fit_predictor(_d, reg_name, clf_name, _reg_oof)
+
+
+def page_ml():
+    st.title("G. Predictive Modelling (machine learning)")
+    st.caption("Can shipment lead time, or the chance of a delay, be predicted from route, ship mode, product and order timing? "
+               "Models are validated with **5-fold cross-validation grouped by customer** (no customer appears in both training and test data) "
+               "and every model must beat a one-line **baseline: the average for its ship mode**. Models use the *relative* lead time "
+               "(the recorded one is dominated by the date offset), always on all validated shipments, independent of the sidebar filters.")
+    ml_ship = dp.build_shipments(dp.apply_basis(dp.analysis_rows(full_df), cfg.ANALYSIS_BASIS_RELATIVE), 5)
+    c1, c2 = st.columns([1, 2])
+    thr = c1.slider("Delay threshold (relative days)", 1, 9, 5, help="Classification target: lead time above this value.")
+    go = c2.button("▶ Train and evaluate models (about 30-90 s the first time)", type="primary")
+    if go:
+        st.session_state["ml_thr"] = thr
+    if "ml_thr" not in st.session_state:
+        st.info("Press the button to train the models. Results are cached, so re-opening this page is instant.")
+        return
+    t = st.session_state["ml_thr"]
+    if t != thr:
+        st.warning(f"Showing results for threshold {t}. Press the button to retrain with {thr}.")
+    try:
+        with st.spinner("Training and cross-validating models…"):
+            R = run_ml_cached(ml_ship, float(t))
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Model training failed: {e}")
+        return
+    d, reg, clf = R["data"], R["reg"]["table"], R["clf"]["table"]
+    br, bc = reg[reg["Model"] == ml.BASELINE_REG].iloc[0], clf[clf["Model"] == ml.BASELINE_CLF].iloc[0]
+    best_r, best_c = reg.sort_values("MAE").iloc[0], clf.sort_values("ROC AUC", ascending=False).iloc[0]
+    k = st.columns(4)
+    k[0].metric("Shipments modelled", f"{len(d):,}")
+    k[1].metric("Baseline MAE (rel. days)", f"{br['MAE']:.3f}", help="Predicting each shipment's lead time as the average for its ship mode.")
+    k[2].metric("Best model MAE", f"{best_r['MAE']:.3f}", f"{best_r['MAE'] - br['MAE']:+.3f} vs baseline", delta_color="inverse")
+    k[3].metric("Best model delay AUC", f"{best_c['ROC AUC']:.3f}", f"{best_c['ROC AUC'] - bc['ROC AUC']:+.3f} vs baseline")
+
+    yes_r = reg.loc[reg["Beats baseline?"] == "Yes", "Model"].tolist(); yes_c = clf.loc[clf["Beats baseline?"] == "Yes", "Model"].tolist()
+    ro_r = reg[reg["Model"].str.contains("route-only")].iloc[0]; ro_c = clf[clf["Model"].str.contains("route-only")].iloc[0]
+    st.subheader("What the models show")
+    st.markdown(
+        f"- **Lead-time regression:** the ship-mode baseline reaches R² = {br['R²']:.2f} (MAE {br['MAE']:.2f}). Models that significantly beat it "
+        f"(95% bootstrap CI): **{', '.join(yes_r) if yes_r else 'none'}**.\n"
+        f"- **Delay classification (> {t} relative days):** baseline AUC = {bc['ROC AUC']:.3f}. Significantly better: "
+        f"**{', '.join(yes_c) if yes_c else 'none'}**"
+        + (f" (gain of {best_c['ROC AUC'] - bc['ROC AUC']:+.3f} AUC, small)." if yes_c else ".") + "\n"
+        f"- **Route information alone** (factory, state, region; no ship mode): R² = {ro_r['R²']:.3f}, AUC = {ro_c['ROC AUC']:.3f}. "
+        + ("That is essentially no predictive power: route effects exist in the data but are too small and noisy to predict new shipments." if ro_r["R²"] < 0.05
+           else "Route information carries some predictive signal.") + "\n"
+        "- Cross-validation compares models fairly on unseen customers; a model that matches the baseline is *not* better, however complex.")
+
+    a, b = st.columns(2)
+    with a:
+        st.plotly_chart(viz.ml_comparison_chart(reg, "MAE", ml.BASELINE_REG, True), use_container_width=True)
+        show_table(reg[["Model", "MAE", "RMSE", "R²", "MAE vs baseline", "95% CI low", "95% CI high", "Beats baseline?"]].round(4))
+    with b:
+        st.plotly_chart(viz.ml_comparison_chart(clf, "ROC AUC", ml.BASELINE_CLF, False), use_container_width=True)
+        show_table(clf[["Model", "ROC AUC", "Avg precision", "Brier score", "AUC vs baseline", "95% CI low", "95% CI high", "Beats baseline?"]].round(4))
+    st.caption("MAE/RMSE are in relative days (lower is better). AUC: 0.5 = chance, 1 = perfect. 'vs baseline' columns show the paired difference with a 95% bootstrap interval.")
+
+    st.subheader("Which inputs matter? (permutation importance, hold-out customers)")
+    a, b = st.columns(2)
+    a.plotly_chart(viz.importance_chart(R["imp_reg"], "Lead-time model: increase in MAE when a feature is shuffled", "MAE increase (relative days)"), use_container_width=True)
+    b.plotly_chart(viz.importance_chart(R["imp_clf"], "Delay model: decrease in AUC when a feature is shuffled", "AUC decrease"), use_container_width=True)
+    st.caption("Features whose importance is near zero (or negative) do not help the model on unseen customers. Error bars are one standard deviation over 10 shuffles.")
+
+    st.subheader("What-if predictor")
+    st.caption("Predictions come from the selected models. Cross-validation shows that route inputs (factory, state) add little beyond ship mode, "
+               "so treat differences between routes in this tool as small and uncertain. The range is an 80% interval from out-of-fold errors, in relative days.")
+    mcol = st.columns(2)
+    reg_name = mcol[0].selectbox("Lead-time model", reg["Model"].tolist(), index=int(reg["Model"].tolist().index(best_r["Model"])))
+    clf_name = mcol[1].selectbox("Delay model", clf["Model"].tolist(), index=int(clf["Model"].tolist().index(best_c["Model"])))
+    pred = fit_predictor_cached(d, reg_name, clf_name, float(t), R["reg"]["oof"][reg_name])
+    ic = st.columns(4)
+    fac = ic[0].selectbox("Factory", sorted(d["Factory"].unique()))
+    sta = ic[1].selectbox("Customer state", sorted(d["Customer State"].unique()), index=sorted(d["Customer State"].unique()).index("New York") if "New York" in set(d["Customer State"]) else 0)
+    mode = ic[2].selectbox("Ship mode", ["Same Day", "First Class", "Second Class", "Standard Class"])
+    div = ic[3].selectbox("Division", sorted(d["Division"].unique()))
+    ic2 = st.columns(4)
+    mon = ic2[0].slider("Order month", 1, 12, 6)
+    dow = ic2[1].slider("Order weekday (0 = Mon)", 0, 6, 2)
+    units = ic2[2].number_input("Units", 1, 50, int(d["Units"].median()))
+    sales = ic2[3].number_input("Sales ($)", 1.0, 500.0, float(round(d["Sales"].median(), 2)))
+    out = ml.predict_what_if(pred, fac, sta, mode, div, mon, dow, units, sales)
+    o = st.columns(3)
+    o[0].metric("Predicted lead time", f"{max(out['lead'], 0):.2f} relative days")
+    o[1].metric("80% range", f"{max(out['low'], 0):.1f} to {max(out['high'], 0):.1f}")
+    o[2].metric(f"Chance of > {t} relative days", f"{out['p_delay']:.0%}")
+
+    st.subheader("Route segments (unsupervised: K-means)")
+    cl = R["clusters"]
+    if cl["k"] > 1:
+        sil = cl["silhouette"]; best_sil = sil["Silhouette"].max()
+        st.caption(f"Ranked routes (≥ {cfg.MIN_SHIPMENTS_FOR_RANKING} shipments) are grouped on ship-mode-adjusted mean lead time, spread, volume and order value. "
+                   f"Best k = {cl['k']} (silhouette {best_sil:.2f}; below ~0.5 means weak, exploratory structure).")
+        a, b = st.columns([3, 2])
+        a.plotly_chart(viz.cluster_scatter(cl["table"]), use_container_width=True)
+        with b:
+            show_table(cl["profile"].round(2))
+            show_table(sil.round(3))
+        with st.expander("Routes by segment"):
+            show_table(cl["table"].sort_values(["Cluster", "Shipments"], ascending=[True, False])[["Cluster", "Route", "Shipments", "Adj mean lead", "Adj lead SD", "Avg sales / shipment"]].round(2), height=320)
+    else:
+        st.info("Not enough ranked routes to cluster.")
+
 # --------------------------------------------------------------------------- #
 # Guard for empty selections
 # --------------------------------------------------------------------------- #
 if page.startswith("F."):
     page_data_quality()
+    st.stop()
+if page.startswith("G."):
+    page_ml()
     st.stop()
 
 if ship.empty:

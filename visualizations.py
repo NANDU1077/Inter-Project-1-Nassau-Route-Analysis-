@@ -259,3 +259,37 @@ def us_heatmap(state_stats: pd.DataFrame, color_metric: str, unit="days"):
         fig.add_annotation(text="Grey = fewer shipments than the ranking minimum", x=0, y=0, xref="paper", yref="paper",
                            showarrow=False, font=dict(size=11, color="#6B7785"))
     return _style(fig, f"US heatmap: {color_metric.lower()} by customer state", height=520)
+
+
+# ----------------------------- machine-learning charts ----------------------------- #
+def ml_comparison_chart(table: pd.DataFrame, metric: str, baseline: str, lower_is_better: bool):
+    """Horizontal bars of a CV metric per model with the baseline highlighted."""
+    if table is None or table.empty:
+        return _empty()
+    d = table.sort_values(metric, ascending=not lower_is_better).copy()
+    d["Colour"] = np.where(d["Model"] == baseline, "Baseline", np.where(d["Model"].str.contains("route-only"), "Route-only", "Model"))
+    fig = px.bar(d, x=metric, y="Model", color="Colour", orientation="h",
+                 color_discrete_map={"Baseline": "#C0392B", "Route-only": "#9AA5B1", "Model": "#1F4E79"})
+    base = d.loc[d["Model"] == baseline, metric].iloc[0]
+    fig.add_vline(x=base, line_dash="dash", line_color="#C0392B")
+    return _style(fig, f"Cross-validated {metric} by model (dashed line = ship-mode baseline)", height=max(300, 46 * len(d) + 110),
+                  xaxis_title=metric, yaxis_title="")
+
+
+def importance_chart(imp: pd.DataFrame, title: str, xlabel: str):
+    if imp is None or imp.empty:
+        return _empty()
+    d = imp.iloc[::-1]
+    fig = px.bar(d, x="Importance", y="Feature", orientation="h", error_x="Std", color_discrete_sequence=["#1F4E79"])
+    return _style(fig, title, height=360, xaxis_title=xlabel, yaxis_title="")
+
+
+def cluster_scatter(tbl: pd.DataFrame):
+    if tbl is None or tbl.empty or "Cluster" not in tbl:
+        return _empty("Not enough ranked routes to cluster")
+    d = tbl.copy(); d["Cluster"] = "Cluster " + d["Cluster"].astype(str)
+    fig = px.scatter(d, x="Adj mean lead", y="Adj lead SD", color="Cluster", size="Shipments", size_max=26, hover_name="Route",
+                     hover_data={"Shipments": ":,", "Avg sales / shipment": ":.2f", "Adj mean lead": ":.2f", "Adj lead SD": ":.2f"})
+    fig.add_vline(x=0, line_dash="dot", line_color="#9AA5B1")
+    return _style(fig, "Route segments (K-means on ship-mode-adjusted behaviour)", height=420,
+                  xaxis_title="Mean lead time vs. expectation for its ship-mode mix (days)", yaxis_title="Lead-time spread within route (days)")
