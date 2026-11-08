@@ -126,7 +126,7 @@ Categories: ≥ 66 Efficient, 33–66 Moderate, < 33 Inefficient (`config.py`).
 * **C. Geographic Map** – US state heatmap (choropleth) plus a bubble map with factories (diamonds), top routes as lines and Canadian provinces; colour = lead time / score / delay rate; bottleneck tables.
 * **D. Ship Mode Comparison** – average/median lead time, delay frequency, volume, sales, gross profit, descriptive trade-off, and a Standard vs. Expedited grouping (assumption: First, Second Class and Same Day = Expedited).
 * **E. Route Drill-Down** – factory/state/region/product/ship-mode selectors, route metrics, state-level insights, shipment timeline, order-line detail.
-* **G. Predictive Modelling (ML)** – cross-validated lead-time regression and delay classification against a ship-mode baseline, permutation importance, what-if predictor, K-means route segments.
+* **G. Lead-Time & Delay Prediction** – cross-validated lead-time regression and delay classification against a ship-mode baseline, permutation importance, what-if predictor, K-means route segments.
 * **F. Data Quality** – missing values, invalid dates, unmapped products, suspicious lead times, duplicates, removal/flag summary, plausibility check.
 
 ## Machine learning
@@ -139,7 +139,7 @@ Categories: ≥ 66 Efficient, 33–66 Moderate, < 33 Inefficient (`config.py`).
 * **Also:** permutation importance on held-out customers; K-means route segments (k by silhouette); a what-if predictor on the dashboard page.
 * **Result on this data:** no model beats the ship-mode baseline for lead time (R² ≈ 0.62); route-only R² ≈ 0; delay AUC improves only from 0.726 to 0.745 with logistic regression. Details in the research paper (Section 5.9).
 
-The Predictive Modelling page trains on demand (about 30-90 s the first time, cached afterwards) and uses all validated shipments, independent of the sidebar filters.
+The Lead-Time & Delay Prediction page trains on demand (about 30-90 s the first time, cached afterwards) and uses all validated shipments, independent of the sidebar filters.
 
 ## Limitations
 

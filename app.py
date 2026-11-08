@@ -106,7 +106,7 @@ def route_cols(t: pd.DataFrame):
 # --------------------------------------------------------------------------- #
 st.sidebar.title("🚚 Nassau Candy")
 PAGES = ["A. Executive Overview", "B. Route Efficiency", "C. Geographic Map", "D. Ship Mode Comparison",
-         "E. Route Drill-Down", "F. Data Quality", "G. Predictive Modelling (ML)"]
+         "E. Route Drill-Down", "F. Data Quality", "G. Lead-Time & Delay Prediction"]
 page = st.sidebar.radio("Dashboard section", PAGES)
 
 with st.sidebar.expander("📁 Data source", expanded=False):
@@ -336,7 +336,7 @@ def fit_predictor_cached(_d: pd.DataFrame, reg_name: str, clf_name: str, thresho
 
 
 def page_ml():
-    st.title("G. Predictive Modelling (machine learning)")
+    st.title("G. Lead-Time & Delay Prediction")
     st.caption("Can shipment lead time, or the chance of a delay, be predicted from route, ship mode, product and order timing? "
                "Models are validated with **5-fold cross-validation grouped by customer** (no customer appears in both training and test data) "
                "and every model must beat a one-line **baseline: the average for its ship mode**. Models use the *relative* lead time "

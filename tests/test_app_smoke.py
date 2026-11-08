@@ -13,7 +13,7 @@ APP = str(ROOT / "app.py")
 pytestmark = pytest.mark.skipif(not (ROOT / "data" / "Nassau_Candy_Distributor.csv").exists(), reason="dataset missing")
 
 PAGES = ["A. Executive Overview", "B. Route Efficiency", "C. Geographic Map", "D. Ship Mode Comparison",
-         "E. Route Drill-Down", "F. Data Quality", "G. Predictive Modelling (ML)"]
+         "E. Route Drill-Down", "F. Data Quality", "G. Lead-Time & Delay Prediction"]
 
 
 def run(page, **kw):
@@ -70,7 +70,7 @@ def test_bad_path_gives_helpful_error():
 def test_ml_page_trains_and_renders():
     at = AppTest.from_file(APP, default_timeout=300)
     at.run()
-    at.sidebar.radio[0].set_value("G. Predictive Modelling (ML)")
+    at.sidebar.radio[0].set_value("G. Lead-Time & Delay Prediction")
     at.run()
     assert not at.exception
     at.button[0].click()

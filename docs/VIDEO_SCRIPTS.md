@@ -25,7 +25,7 @@ basis carries roughly one day of noise."
 **3:45 Dashboard demo.** Route Efficiency (leaderboard, top and bottom ten) → Geographic Map (US heatmap, routes, Canada) → Ship Mode (Standard vs
 Expedited) → Route Drill-Down (timeline, state insights) → filters and the empty-filter message.
 
-**5:00 Machine learning (Predictive Modelling page; press Train first).** "I tested whether lead time and delay can be predicted from route, ship
+**5:00 Machine learning (Lead-Time & Delay Prediction page; press Train first).** "I tested whether lead time and delay can be predicted from route, ship
 mode, product and order timing. I used five-fold cross-validation grouped by customer, so no customer appears in both training and test data, and I
 compared every model with a baseline: the average for each ship mode. I trained Ridge regression, random forest and gradient boosting."
 "Result: none of the models predicted lead time better than the baseline, which already reaches R squared of 0.62. A model using only route
